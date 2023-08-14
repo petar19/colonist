@@ -1,0 +1,17 @@
+
+dice_gif_images/*.png
+
+newest_result/*.png
+results/*
+
+dice_stats.*
+
+gamelogs/*.txt
+
+rankings.json
+rankings_heatmap.png
+rankings_piechart.png
+rankings_piechart.png
+rankings_heatmap.png
+
+temp.txt
