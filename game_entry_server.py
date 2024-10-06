@@ -1,5 +1,6 @@
 from bs4 import BeautifulSoup
 from game_entry import handle_lines
+from count_cards import count_cards
 from discord_webhook import DiscordWebhook, DiscordEmbed
 
 from flask import Flask
@@ -8,8 +9,12 @@ from flask_cors import CORS
 
 import json
 
+webhookUrl = None
+with open('discordWebhookUrl.txt') as f:
+    webhookUrl = f.readline().strip()
 
-webhook = DiscordWebhook(url='https://discord.com/api/webhooks/1041793789259427922/PpFvEeNTN9em062BMdDSTf_BTJ93SoGkndNYwe5SFYf_9W56AerhgtGJjgwKTPWw4DuB', content='')
+print(f'{webhookUrl=}')
+webhook = DiscordWebhook(url='webhookUrl', content='')
 
 ignoredList = [
     "Thank you for playing",
@@ -21,7 +26,7 @@ ignoredList = [
 ]
 
 
-def _parse(messages):
+def processMessages(messages):
     res = []
     for m in messages:
         messageString = str(m)
@@ -58,21 +63,21 @@ def parse(source):
     soup = BeautifulSoup(source, 'html.parser')
 
     messages = soup.find_all("div", {"class" : "message-post"})
-    result = _parse(messages)
+    result = processMessages(messages)
 
     return result
     
 
 def upload_to_discord():
-    folder = "C:\\Users\\petar\\Desktop\\colonist\\newest_result\\"
+    folder = "C:\\Users\\petar\\Desktop\\catan\\newest_result\\"
     files = [
         "dice_resources_stats.png",
         "dice_stats_through_turns.png",
         "dices_per_player_and_resource.png",
-        "player_card_count_per_change.png",
         "dices_players_rolled.png",
         "points_stats_through_turns.png",
         "resources_players.png",
+        "resources_through_turns.png",
         "stealings.png",
         "trades_players.png",
     ]
@@ -106,6 +111,21 @@ def analize_game_request():
     if sendToDiscord: upload_to_discord()
     return 'OK', 200
 
+
+@app.route("/countCards", methods=['POST'])
+def count_cards_request():
+    req = json.loads(request.data)
+    messages = req["messages"]
+
+    result = parse(messages)
+    if len(result) == 0: return "incorrect format", 400
+
+    countedCards = count_cards(result)
+    result = ""
+    for c in countedCards: result += str(c) + "\n"
+    print('countedCards', result)
+
+    return result, 200
 
 def main():
     app.run(host="0.0.0.0", port=5009, debug=True)

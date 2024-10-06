@@ -22,10 +22,9 @@ logging.basicConfig(
 
 possible_resources = ["grain", "ore", "wool", "brick", "lumber"]
 resource_colors = ["gold", "silver", "lawngreen", "firebrick", "seagreen"]
+resource_to_color = {k:v for k,v in zip(possible_resources, resource_colors)}
 resource_colors_alt = ["goldenrod", "darkgray", "yellowgreen", "darkred", "darkgreen"]
 replacements = [
-	("icon_helmet passed from", "Guestlongest road passed from"),
-	("Guest passed from", "Guestlongest road passed from"),
 	("Guest", ""),
 	("User", ""),
 	("bot", ""),
@@ -33,16 +32,14 @@ replacements = [
 	("icon_helmet", ""),
 	("icon_cactus", ""),
 	("icon_crown", ""),
+	("icon_scarf", ""),
 	("icon_avocado", ""),
 	("Colonist", ""),
 	("Christmas", ""),
 	("Settle", ""),
 	("icon_sombrero", ""),
 	("You", "Myrna8511"),
-	("you", "Myrna8511"),
-	("has passed from", "passed from"),
-	("(", ""),
-	(")", ""),
+	("you", "Myrna8511")
 ]
 
 def check_args():
@@ -82,6 +79,7 @@ def read_and_filter_lines(file_name):
 		return lines
 
 def process_game(lines):
+	
 	dices = [0]*11; dices_until_turn = []; turn = 0
 	players = {}; player_points = [2]*4; player_points_until_turn = {}
 	special = {"longest": "", "largest": "", "winner": "", "last_rolled": 0}
@@ -92,6 +90,23 @@ def process_game(lines):
 	player_card_count_through_turns = {}
 
 	player_card_count_per_change = defaultdict(list)
+
+	resources_through_turns = defaultdict(dict)
+	def add_to_resource_through_turns(resource_map, turn):
+		# print('adding resource to turns', resource_map, turn)
+		for resource, n in resource_map.items():
+			existing_values = resources_through_turns[resource]
+			# print('existing values', existing_values)
+			previous_value = 0
+			if turn in existing_values:
+				previous_value = existing_values[turn]
+			elif (turn-1) in existing_values:
+				previous_value = existing_values[turn - 1]
+
+			new_value = previous_value + n
+			# print('new_value', previous_value,n,new_value)
+			resources_through_turns[resource][turn] = new_value
+		# print('finished adding resources through turbn', resources_through_turns)
 
 	player_dice_rolls = defaultdict(lambda : [0]*11)
 
@@ -123,6 +138,7 @@ def process_game(lines):
 
 	def handle_starting_resources(line, i, player, turn):
 		logging.debug(f"handle_starting_resources({player})")
+		if player in players: return turn
 		players[player] = 3 - len(players)
 		logging.debug(f"\tresult = {players[player]}")
 		return turn
@@ -132,20 +148,28 @@ def process_game(lines):
 
 		last_rolled = special["last_rolled"]
 
-		m = re.match(r"^(?P<player>[\w#]+) got.* (?P<resources>\w+)$", line)
+		m = re.match(r"^(?P<player>[\w#]+)\s+got\s+(?P<resources>.+)$", line)
+		if m is None: return turn
 		resources = count_resources(m.group('resources'))
 
 		# resources = count_resources(l.split(":")[1].strip())
+		resource_map = {}
 		for i,res in enumerate(resources):
-			resources_per_player[(player, index_to_resource(i))] += res
-			resources_per_player_per_dice[(player, index_to_resource(i), last_rolled)] += res
+			resource_name = index_to_resource(i)
+			resources_per_player[(player, resource_name)] += res
+			resources_per_player_per_dice[(player, resource_name, last_rolled)] += res
+			resource_map[resource_name] = res
+		print('functjon call adding resource to turns', line, turn)
+		add_to_resource_through_turns(resource_map, turn)
+
 		logging.debug(f"\tresult = {resources_per_player=}")
 
 		return turn
 
 	def handle_roll(line, i, player, turn):
 		logging.debug(f"handle_roll({line}), {dices=}, {dices_until_turn=}")
-		m = re.match(r"^(?P<player>[\w#]+) rolled.* dice_(?P<dice1>\d) dice_(?P<dice2>\d)$", line)
+		add_to_resource_through_turns({k:0 for k in possible_resources}, turn)
+		m = re.match(r"^(?P<player>[\w#]+)\s+rolled.*\s+dice_(?P<dice1>\d)\s+dice_(?P<dice2>\d)$", line)
 		rolled1 = int(m.group('dice1'))
 		rolled2 = int(m.group('dice2'))
 		dice_roll = rolled1 + rolled2
@@ -159,14 +183,17 @@ def process_game(lines):
 
 		player_dice_rolls[player][dice_roll-2] += 1
 
+		print('hataaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', line, turn)
+
 		return turn + 1
 	
 	def handle_vp(line, i, player, turn):
-		logging.debug(f"handle_roll({line}, {player}), {special=}, {player_points=}")
+		logging.debug(f"handle_vp({line}, {player}), {special=}, {player_points=}")
+
 		longest = special["longest"]
 		largest = special["largest"]
 
-		m = re.match(r".*\+(?P<howMany>\w+) VP.*$", line)
+		m = re.match(r".*\+(?P<howMany>\w+)\s+VP.*$", line)
 
 		VPs = int(m.group('howMany'))
 
@@ -174,33 +201,37 @@ def process_game(lines):
 			special["longest"] = player
 		elif "largest" in line:
 			special["largest"] = player
-			
-		if "passed" in line:
-			m = re.match(r"^.* passed from.* (?P<fromPlayer>[\w#]+) to.* (?P<toPlayer>[\w#]+).* \+2 VPs$",line)
+
+		if re.match(r"^.*longest\s+road\s+passed\s+from\s+(?P<fromPlayer>[\w#]+)\s+to\s+(?P<toPlayer>[\w#]+)\s+\(\+2\s+VPs\)$",line) is not None:
+			m = re.match(r"^.*longest\s+road\s+passed\s+from\s+(?P<fromPlayer>[\w#]+)\s+to\s+(?P<toPlayer>[\w#]+)\s+\(\+2\s+VPs\)$",line)
 			player_who_lost = m.group('fromPlayer')
 			player = m.group('toPlayer')
 
-			print("player_who_lost and won passed from", player_who_lost, player)
+			player_points[player_to_index(player_who_lost)] -= VPs
+
+		if re.match(r"^.*largest\s+army\s+passed\s+from\s+(?P<fromPlayer>[\w#]+)\s+to\s+(?P<toPlayer>[\w#]+)\s+\(\+2\s+VPs\)$",line) is not None:
+			m = re.match(r"^.*largest\s+army\s+passed\s+from\s+(?P<fromPlayer>[\w#]+)\s+to\s+(?P<toPlayer>[\w#]+)\s+\(\+2\s+VPs\)$",line)
+			player_who_lost = m.group('fromPlayer')
+			player = m.group('toPlayer')
+
 			player_points[player_to_index(player_who_lost)] -= VPs
 
 		player_points[player_to_index(player)] += VPs
-
 
 		logging.debug(f"\tresult = {special=}, {player_points=}")
 		return turn
 
 	def handle_win(line, i, player, turn):
-		m = re.match(r"^trophy\s*(?P<winner>[\w#]+) won the game.*$", line)
+		m = re.match(r"^trophy\s*(?P<winner>[\w#]+)\s+won\s+the\s+game.*$", line)
 		winner = m.group('winner')
-		print("winn er", winner, line)
 		special["winner"] = winner
 		return turn
 
 	def handle_steal(line, i, player, turn):
 		logging.debug(f"handle_steal({line}, {i}, {player}, {turn}), {steal_map=}")
-		if re.match(r"^(?P<stealer>[\w#]+) stole.* (?P<stolenResource>\w+) from.* (?P<victim>[\w#]*)$", line) is None: return turn
+		m = re.match(r"^(?P<stealer>[\w#]+)\s+stole\s+(?P<stolenResource>\w+)\s+from\s+(?P<victim>[\w#]*)$", line)
+		if m is None: return turn
 
-		m = re.match(r"^(?P<stealer>[\w#]+) stole.* (?P<stolenResource>\w+) from.* (?P<victim>[\w#]*)$", line)
 		stealer = m.group('stealer')
 		victim = m.group('victim')
 
@@ -209,8 +240,8 @@ def process_game(lines):
 		return turn
 
 	def handle_trade(line, i, player, turn):
-		if re.match(r"^(?P<player>[\w#]+) traded.* (?P<givenResources>\w*) for.* (?P<receivedResources>\w*) with.* (?P<otherPlayer>[\w#]+)$", line) is not None:
-			m = re.match(r"^(?P<player>[\w#]+) traded.* (?P<givenResources>\w*) for.* (?P<receivedResources>\w*) with.* (?P<otherPlayer>[\w#]+)$", line)
+		if re.match(r"^(?P<player>[\w#]+)\s+gave\s+(?P<givenResources>.*)\s+and\s+got\s+(?P<receivedResources>.*)\s+from\s+(?P<otherPlayer>[\w#]+)$", line) is not None:
+			m = re.match(r"^(?P<player>[\w#]+)\s+gave\s+(?P<givenResources>.*)\s+and\s+got\s+(?P<receivedResources>.*)\s+from\s+(?P<otherPlayer>[\w#]+)$", line)
 			player = m.group('player')
 			other_player = m.group('otherPlayer')
 			given = count_resources(m.group('givenResources'))
@@ -221,8 +252,8 @@ def process_game(lines):
 			trades["p2p_received"][player].append(taken)
 			trades["p2p_received"][other_player].append(given)
 
-		elif re.match(r"^(?P<player>[\w#]+) gave bank.* (?P<spentResources>\w*) and took (?P<receivedResources>\w*)$", line) is not None:
-			m = re.match(r"^(?P<player>[\w#]+) gave bank.* (?P<spentResources>\w*) and took (?P<receivedResources>\w*)$", line)
+		elif re.match(r"^(?P<player>[\w#]+)\s+gave\s+bank\s+(?P<spentResources>.*)\s+and\s+took\s+(?P<receivedResources>.*)$", line) is not None:
+			m = re.match(r"^(?P<player>[\w#]+)\s+gave\s+bank\s+(?P<spentResources>.*)\s+and\s+took\s+(?P<receivedResources>.*)$", line)
 			player = m.group('player')
 			given = count_resources(m.group('spentResources'))
 			taken = count_resources(m.group('receivedResources'))
@@ -236,17 +267,17 @@ def process_game(lines):
 		logging.debug(f"handle_count({line}), {player_card_count=}")
 
 		if "starting resources" in line or "got" in line:
-			resources_gotten = sum(count_resources(line.split()[-1]))
+			resources_gotten = sum(count_resources(line))
 			player_card_count[player] += resources_gotten
-		elif re.match(r"^(?P<stealer>[\w#]+) stole.* (?P<stolenResource>\w+) from.* (?P<victim>[\w#]*)$", line) is not None:
-			m = re.match(r"^(?P<stealer>[\w#]+) stole.* (?P<stolenResource>\w+) from.* (?P<victim>[\w#]*)$", line)
+		elif re.match(r"^(?P<stealer>[\w#]+)\s+stole\s+(?P<stolenResource>\w+)\s+from\s+(?P<victim>[\w#]*)$", line) is not None:
+			m = re.match(r"^(?P<stealer>[\w#]+)\s+stole\s+(?P<stolenResource>\w+)\s+from\s+(?P<victim>[\w#]*)$", line)
 			stealer = m.group('stealer')
 			victim = m.group('victim')
 
 			player_card_count[stealer] += 1
 			player_card_count[victim] -= 1
 		elif "discarded" in line:
-			resources_discared = sum(count_resources(line.split()[-1]))
+			resources_discared = sum(count_resources(line))
 			player_card_count[player] -= resources_discared
 		elif "used Year of Plenty" in line:
 			player_card_count[player] += 2
@@ -258,23 +289,23 @@ def process_game(lines):
 			player_card_count[player] -= 5
 		elif "bought development card" in line:
 			player_card_count[player] -= 3
-		elif re.match(r"^(?P<player>[\w#]+) stole (?P<howMany>\d+).* (?P<resources>\w+)$", line) is not None:
-			m = re.match(r"^(?P<player>[\w#]+) stole (?P<howMany>\d+).* (?P<resource>\w+)$", line)
+		elif re.match(r"^(?P<player>[\w#]+)\s+stole\s+(?P<howMany>\d+)\s+(?P<resources>\w+)$", line) is not None:
+			m = re.match(r"^(?P<player>[\w#]+)\s+stole\s+(?P<howMany>\d+)\s+(?P<resources>\w+)$", line)
 			player = m.group('player')
 			howMany = m.group('howMany')
 			
 			stoleHowMany = int(howMany)
 			player_card_count[player] += stoleHowMany
-		elif re.match(r"^(?P<player>[\w#]+) gave bank.* (?P<spentResources>\w*) and took (?P<receivedResources>\w*)$", line) is not None:
-			m = re.match(r"^(?P<player>[\w#]+) gave bank.* (?P<spentResources>\w*) and took (?P<receivedResources>\w*)$", line)
+		elif re.match(r"^(?P<player>[\w#]+)\s+gave\s+bank\s+(?P<spentResources>.*)\s+and\s+took\s+(?P<receivedResources>.*)$", line) is not None:
+			m = re.match(r"^(?P<player>[\w#]+)\s+gave\s+bank\s+(?P<spentResources>.*)\s+and\s+took\s+(?P<receivedResources>.*)$", line)
 			player = m.group('player')
 			given = sum(count_resources(m.group('spentResources')))
 			taken = sum(count_resources(m.group('receivedResources')))
 
 			player_card_count[player] -= given
 			player_card_count[player] += taken
-		elif re.match(r"^(?P<player>[\w#]+) traded.* (?P<givenResources>\w*) for.* (?P<receivedResources>\w*) with.* (?P<otherPlayer>[\w#]+)$", line) is not None:
-			m = re.match(r"^(?P<player>[\w#]+) traded.* (?P<givenResources>\w*) for.* (?P<receivedResources>\w*) with.* (?P<otherPlayer>[\w#]+)$", line)
+		elif re.match(r"^(?P<player>[\w#]+)\s+traded\s+(?P<givenResources>.*)\s+for\s+(?P<receivedResources>.*)\s+with\s+(?P<otherPlayer>[\w#]+)$", line) is not None:
+			m = re.match(r"^(?P<player>[\w#]+)\s+traded\s+(?P<givenResources>.*)\s+for\s+(?P<receivedResources>.*)\s+with\s+(?P<otherPlayer>[\w#]+)$", line)
 			player = m.group('player')
 			other_player = m.group('otherPlayer')
 			given = sum(count_resources(m.group('givenResources')))
@@ -312,14 +343,14 @@ def process_game(lines):
 		"stole": [handle_steal, handle_count],
 		"won the game": [handle_win],
 		"discarded": [handle_count],
-		"built a road": [handle_count],
-		"built a city": [handle_count],
+		# "built a road": [handle_count],
+		# "built a city": [handle_count],
 		"gave bank": [handle_count, handle_trade],
-		"built a settlement": [handle_count],
+		# "built a settlement": [handle_count],
 		"used Monopoly card": [handle_count],
 		"used Year of Plenty": [handle_count],
-		"bought development card": [handle_count],
-		"traded": [handle_count, handle_trade],
+		# "bought development card": [handle_count],
+		"and got": [handle_count, handle_trade],
 	}
 
 	print("handling lines", lines)
@@ -340,6 +371,12 @@ def process_game(lines):
 			summed[p] = playerSummed if len(playerSummed) > 0 else [0]*5
 		trades[trade_type] = summed
 
+	resouces_through_turns_with_lists = defaultdict(list)
+	for resource, values in resources_through_turns.items():
+		values_list = values.values()
+		resouces_through_turns_with_lists[resource] = values_list
+	print('oiiii', resources_through_turns, resouces_through_turns_with_lists)
+
 	result = {
 		"dices": dices,
 		"dices_until_turn": dices_until_turn,
@@ -348,6 +385,7 @@ def process_game(lines):
 		"player_points_until_turn": player_points_until_turn,
 		"resources_per_player": resources_per_player,
 		"resources_per_player_per_dice": resources_per_player_per_dice,
+		"resources_through_turns": resouces_through_turns_with_lists,
 		"index_to_player": index_to_player,
 		"player_to_index": player_to_index,
 		"index_to_resource": index_to_resource,
@@ -459,6 +497,28 @@ def plot_rolls_through_turns(dices_until_turn, dices, folder_name, turn, skip_sh
 	plt.savefig(f"newest_result/dice_stats_through_turns.png")
 	if not skip_show: plt.show()
 
+def plot_resources_through_turns(resources_through_turns, folder_name, skip_show):
+	logging.debug(f"plot_resources_through_turns({resources_through_turns}, {folder_name}, {skip_show}")
+	print('plot_resources_through_turns', resources_through_turns)
+	plt.figure(figsize=(12,10))
+	for resource, numbers in resources_through_turns.items():
+		plt.scatter(range(1, len(numbers)+1), numbers, s=10, color=resource_to_color[resource])
+		plt.plot(range(1, len(numbers)+1), numbers, label=f"{resource}", color=resource_to_color[resource])
+
+	# x_anno = turn + 1.5
+
+	# rolled_to_dice_map = defaultdict(list)
+	# for i,y_anno in enumerate(dices):
+	# 	rolled_to_dice_map[(x_anno, y_anno)].append(i+2)
+
+	# for k,v in rolled_to_dice_map.items():
+	# 	plt.annotate(f"{v}: {k[1]}", (*k,))
+
+	plt.legend()
+	plt.savefig(f"{folder_name}/resources_through_turns.png")
+	plt.savefig(f"newest_result/resources_through_turns.png")
+	if not skip_show: plt.show()
+
 def plot_dice_resource_stats(dices_until_turn, dices, folder_name, skip_show):
 	plt.figure(figsize=(11,11))
 	turn_num = len(dices_until_turn)
@@ -520,7 +580,6 @@ def plot_player_dice_rolls(player_dice_rolls, folder_name, skip_show):
 
 def plot_trades_per_players(trades, players, folder_name, skip_show):
 	plt.figure(figsize=(22,16))
-	print(trades)
 
 	max_graph = 35
 	try:
@@ -530,7 +589,6 @@ def plot_trades_per_players(trades, players, folder_name, skip_show):
 			))
 	except:
 		pass
-	print("maxgraph", max_graph)
 
 	subplots = 1
 	for p in players.keys():
@@ -697,17 +755,18 @@ def do(file_name, skip_show, skip_dices, newestOnly = False):
 	make_folder(folder_name)
 
 	res = process_game(lines)
-	dices, dices_until_turn, players, player_points, player_points_until_turn, resources_per_player, resources_per_player_per_dice, index_to_player, player_to_index, index_to_resource, turn, steal_map, winner, player_card_count_through_turns, player_card_count_per_change, trades, player_dice_rolls = res.values()
+	dices, dices_until_turn, players, player_points, player_points_until_turn, resources_per_player, resources_per_player_per_dice, resources_through_turns, index_to_player, player_to_index, index_to_resource, turn, steal_map, winner, player_card_count_through_turns, player_card_count_per_change, trades, player_dice_rolls = res.values()
 
 	if not newestOnly: update_rankings_file_directly(players, player_points, winner, file_name)
 
 	plot_players_until_turn(player_points_until_turn, player_points, index_to_player, folder_name, turn, skip_show)
 	# plot_card_count_through_turns(player_card_count_through_turns, index_to_player, folder_name, turn, skip_show)
-	plot_card_count_per_change(player_card_count_per_change, index_to_player, folder_name, turn, skip_show)
+	# plot_card_count_per_change(player_card_count_per_change, index_to_player, folder_name, turn, skip_show)
 	plot_rolls_through_turns(dices_until_turn, dices, folder_name, turn, skip_show)
 	plot_dice_resource_stats(dices_until_turn, dices, folder_name, skip_show)
 	plot_resources_per_players(resources_per_player, players, folder_name, skip_show)
 	plot_resources_per_players_per_dices(resources_per_player_per_dice, players, folder_name, skip_show)
+	plot_resources_through_turns(resources_through_turns, folder_name, skip_show)
 	plot_trades_per_players(trades, players, folder_name, skip_show)
 	plot_player_dice_rolls(player_dice_rolls, folder_name, skip_show)
 	if not skip_dices: plot_total_dice_stats(dices, skip_show)
